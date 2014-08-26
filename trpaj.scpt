@@ -9,7 +9,7 @@ on run argv
 	#	Set the destination directory for moving,
 	#	leave empty ("") for rename only.
 	set dDir to "~/Movies/"
-	set apiURL to "&api_key=327a7002b11d7bbb6590aa9629ef7535"
+	set apiURL to "&api_key=####"
 	
 	#	Retrieve arguments:
 	set torrentDir to item 1 of argv
