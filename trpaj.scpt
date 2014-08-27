@@ -3,232 +3,257 @@
 #
 
 on run argv
-	
-	##	VARIABLES
-	
-	#	Set the destination directory for moving,
-	#	leave empty ("") for rename only.
+
+	--	SET VARIABLES AND PROPERTIES
+
+	--	Set the destination directory for moving,
+	--	leave empty ("") for rename only.
 	set dDir to "~/Movies/"
+	--	Replace the #### with your API-key
 	set apiURL to "&api_key=####"
-	
-	#	Retrieve arguments:
+	(*
+	--	Enable keeping log, for now only idea
+	property enableLog:	false
+	--	Empty ("") means a file will be stored in the original torrent folder
+	property pathToLog: ""
+	*)
+
+	--	Retrieve arguments
 	set torrentDir to item 1 of argv
 	set torrentName to item 2 of argv
-	#	Test values:
-	--set torrentDir to "~/Downloads"
-	--set torrentName to "They Came Together (2014)"
-	set torrentName to do shell script ("echo " & quoted form of torrentName & " | sed -E 's/( |\\(|\\))/\\\\\\1/g'")
+
 	set torrentPath to torrentDir & "/" & torrentName as string
-	
-	##	SHELLWORK
-	
-	#	Check for video files in torrent directory
+	set torrentPath to RunSed(torrentPath, "-E ", "s/( |\\(|\\))/", "\\\\\\1", "g")
+
+	--	Check for video files in torrent directory
 	set dirReturn to do shell script "ls -Rp " & torrentPath
 	set dirContents to paragraphs of dirReturn as list
+
+	--	NUTSHELL
+
+	--	Get all video files in folder
 	set videoFiles to GetVideos(dirContents, torrentPath & "/")
-	--return videoFiles
-	(*
-	if (number of items in videoFiles = 1) then
-		do shell script "echo 'No video files in this directory.' >> " & torrentPath & "/res.txt"
-		return 0
+
+	--	Check if any video files
+	if (videoFiles = "" as list) then
+		return -1	--	No execution errors, no video files
 	end if
-	*)
-	
-	#	If more video files, choose the largest
+	--	If more video files in torrent dir, choose the largest
 	set movieFile to ChooseMovieFile(videoFiles)
-	--return movieFile
-	#	To avoid renaming video files from non-movie torrents
+
+	--	Avoid renaming video files from non-movie torrents
 	if (IsMovie(movieFile) is false) then
-		do shell script "echo 'There is a video but no movies.' >> " & torrentPath & "/res.txt"
-		return 0
+		return -2 --	No execution errors, yes video files BUT NO MOVIES
 	end if
-	
+
+	--	Make file name into searchable string
 	set queryString to MakeString(torrentPath, item 1 of movieFile, apiURL)
-	
-	#	Now, let's get the JSON and set rename string
-	set renameString to GetNewName(queryString, item 4 of movieFile)
-	
-	#	Finally, rename the file:
-	set moveCommand to "mv -f " & item 1 of movieFile & " " & quoted form of (dDir & renameString)
-	
+
+	--	Get JSON from themoviedb.org and set rename string
+	set renameString to GetNewName(queryString, item 4 of movieFile, apiURL)
+
+	--	Return rename string to it's backslashed state
+	set renameString to RunSed(renameString, "-E ", "s/( |\\(|\\))/", "\\\\\\1", "g")
+
+	--	Rename the file:
+	set moveCommand to "mv -f " & item 1 of movieFile & " " & dDir & renameString
 	do shell script (moveCommand)
-	return moveCommand
-	
+
+	return 0 --	All is well, there were video files and now they are moved
+
 end run
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
+
+
 on GetVideos(_dirContents, _dirPath)
-	
+
+	--	Get all video files in a directory, and all the subdirectories
+	--	Discard other files or folders
+
+	--	Indicates next line is a folder
 	set folderFlag to false
+	--	List of common video file extensions
 	set extList to {".avi", ".mp4", ".mkv", ".mpeg", ".mpg", ".mov", ".wmv", ".rm", ".qt", ".3gp", ".ogm"}
+	--	Set default value for return
 	set videoList to {""} as list
+	--	A flag to rewrite videoList
 	set firstTime to true
-	
+
 	repeat with lineFromLS in _dirContents
-		
+
+		--	Analyze every line of ls command
 		try
-			if (lineFromLS = "") then -- Nothing to analyze
-				set folderFlag to true -- Next line is subfolder path
-				error 0 -- Continue repeat loop
+			if (lineFromLS = "") then
+				--	Nothing to analyze, next line is subfolder path
+				set folderFlag to true
+				--	Continue repeat loop
+				error 0
 			end if
-			
+
 			if folderFlag is true then
-				set _dirPath to value of lineFromLS -- change working directory
-				set folderFlag to false -- Next line is either blank or file
-				error 0 -- Continue repeat loop
+				--	Chankge working directory
+				set _dirPath to value of lineFromLS
+				--	Next line is either blank or file
+				set folderFlag to false
+				--	Continue repeat loop
+				error 0
 			end if
-			
-			#	Regular expression to extract the extension with sed
+
+			--	Regular expression to extract the extension with sed
 			set sedArgOpt to "s/\\(.*\\)\\(\\.[a-zA-Z0-9]\\{2,4\\}$\\)/\\2/p"
-			
-			#	Create shell line:
+
+			--	Create shell line
 			set executeCmd to "echo " & quoted form of lineFromLS & " | sed -n " & quoted form of sedArgOpt
 			set regExpResult to do shell script (executeCmd)
-			
+
+			--	Check if video file (by extension comparison)
 			if regExpResult is in extList then
+				--	Temp list
+				set lineFromLS to RunSed(lineFromLS, "-E ", "s/( |\\(|\\))/", "\\\\\\1", "g")
+				--	If this is the first video file in directory
 				if (firstTime is true) then
+					--	Not first time anymore
 					set firstTime to false
+					--	Replace "" with file path
 					set item 1 of videoList to (_dirPath & lineFromLS)
 				else
+					--	Not the first time; Append file path to the list
 					set videoList to videoList & (_dirPath & lineFromLS)
 				end if
 			end if
 		end try
-		
+
 	end repeat
-	
+
 	return videoList
-	
+
 end GetVideos
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
+
+
 on ChooseMovieFile(_videoFiles)
-	
+
+	--	Choose the largest video file by size
+	--	Works with one or more entries
+
+	--	Anything has more than -1 bytes
 	set sizeOfLargest to -1
+	--	A placeholder for the returned variable, pardon my French
 	set chosenMovieFile to "picka ti se ogadila jebem ti mater"
-	
+
+	--	Go through files and return the biggest one
 	repeat with videoEntry in _videoFiles
+
+		--	This is a work-around a problem I had with folder
+		--	directories with spaces in them. Echoed result of
+		--	videoEntry strips the backslashes, which is good
+		--	for "System Events" but bad for shell, thus *Temp
+
 		set videoEntryTemp to do shell script ("echo " & videoEntry)
 		try
+			--	Check if it's not empty string
 			if (videoEntry is not "") then
-				
-				#	Get information for the video file
+
+				--	Get meta information for the file(s)
 				tell application "System Events"
-					set timeScale to time scale of movie file videoEntryTemp --as alias
+
+					--	Usually 600, represents the value of 1 second
+					set timeScale to time scale of movie file videoEntryTemp
+					--	Upscaled by timeScale, in seconds
 					set durationOfVideo to duration of movie file videoEntryTemp
+					--	Downscaled by timeScale and 60 to get minutes
 					set durationScaled to durationOfVideo / timeScale / 60
+					--	In Bytes, so probably hundreds of millions
 					set sizeOfVideoFile to size of movie file videoEntryTemp
+
 				end tell
-				
-				#	Get extension
+
+				--	Get extension
 				set extension to do shell script ("echo " & quoted form of videoEntryTemp & " | sed -n 's/\\(.*\\)\\(\\.[a-zA-Z0-9]\\{3,4\\}$\\)/\\2/p'")
+
+				--	Check sizes
 				if (sizeOfVideoFile > sizeOfLargest) then
+					--	Set return value
 					set chosenMovieFile to {videoEntry, sizeOfVideoFile, durationScaled, extension}
+					--	Update largest file size
 					set sizeOfLargest to sizeOfVideoFile
 				end if
 			end if
 		end try
+
 	end repeat
-	
+
 	return chosenMovieFile
-	
+
 end ChooseMovieFile
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
+
+
 on IsMovie(_movieFile)
-	
-	#	This is a tricky one.
-	#	I do a basic length and size check and do a regular
-	#	expression check for usual tv torrent names.
-	#
-	#	What is the cutoff for the length of a film? (minutes)
+
+	--	This is a tricky one.
+	--	I do a basic length and size check and do a regular
+	--	expression check for usual tv torrent names.
+
+	--	Set cutoff (minimum) time (in minutes) for a movie
 	set cutoffLength to 81
-	#
-	#	What is the cutoff size of a movie video file? (Bytes)
+
+	--	Set cutoff (minimum) size (in Bytes) for a movie
 	set cutoffSize to 6.0E+8 -- 600 000 000 = 600 MB
-	
-	#	Regular expression for SxxExx format
+
+	--	Sometimes TV shows can meet cutoff values,
+	--	so we check in the file name for TV patterns
+
+	--	Regular expression for SxxExx format (S02E14)
 	set sedArgOpt1 to "s/\\(.*\\)\\([sS][0-9]\\{1,2\\}[eE][0-9]\\{1,2\\}\\)\\(.*\\)/false/p"
-	#	Regular expression for SSxEE format
+	--	Regular expression for SSxEE format (3x02)
 	set sedArgOpt2 to "s/\\(.*\\)\\([0-9]\\{1,2\\}[xX][0-9]\\{1,2\\}\\)\\(.*\\)/false/p"
-	
+
+	--	Regular expressions return "false" if the pattern
+	--	is found, "" otherwise.
 	set checkRE to "echo " & quoted form of item 1 of _movieFile & " | sed -n " & quoted form of sedArgOpt1
 	set reCheck1 to do shell script (checkRE)
 	set checkRE to "echo " & quoted form of item 1 of _movieFile & " | sed -n " & quoted form of sedArgOpt2
 	set reCheck2 to do shell script (checkRE)
-	
-	#	Checking for regular expressions first.
-	#	If filename is not tv-like, check cutoff length and size
+
+	--	Checking for regular expressions first.
+	--	If file name is not a tv pattern (value is "")
+	--	then check against cutoff values.
 	if (reCheck1 = "false") then
 		set isAMovie to false
 	else if (reCheck2 = "false") then
 		set isAMovie to false
-	else if (item 3 of _movieFile < cutoffLength) then
-		set isAMovie to false
+		--else if (item 3 of _movieFile < cutoffLength) then
+		--	set isAMovie to false
 	else if (item 2 of _movieFile < cutoffSize) then
 		set isAMovie to false
 	else
+		--	The file hasn't met ANY of the conditions
+		--	which would exclude it from being a movie.
 		set isAMovie to true
 	end if
-	
+
 	return isAMovie
-	
+
 end IsMovie
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
+
+
 on MakeString(_dirName, _fileName)
-	
-	#	Check if strings are equal after stripping down.
-	#	If not, choose the longer one to represent the query:
+
+	--	Check if strings are equal after stripping down.
+	--	If not, choose the longer one to represent the query.
+
+	--	Trim the extension from filename
 	set sedArgOpt to "s/\\(\\.[a-zA-Z0-9]\\{2,4\\}\\)\\{0,1\\}$//p"
 	set executeCmd to "echo " & quoted form of _fileName & " | sed -n " & quoted form of sedArgOpt
-	set _fileName to do shell script (executeCmd) -- Trims the extension
-	
+	set _fileName to do shell script (executeCmd)
+
+	--	Remove path prior to the file name
 	set sedArgOpt to "s/\\(.*\\)\\/\\(.*\\)$/\\2/p"
 	set executeCmd to "echo " & quoted form of _fileName & " | sed -n " & quoted form of sedArgOpt
-	set _fileName to do shell script (executeCmd) -- Only filename
-	
+	set _fileName to do shell script (executeCmd)
+
+	--	Remove path prior to the directory name
 	set executeCmd to "echo " & quoted form of _dirName & " | sed -n " & quoted form of sedArgOpt
-	set _dirName to do shell script (executeCmd) -- Only directory name
-	
+	set _dirName to do shell script (executeCmd)
+
 	if (_fileName = _dirName) then
 		set unprocessedString to _fileName
 	else if (length of _fileName > length of _dirName) then
@@ -236,66 +261,96 @@ on MakeString(_dirName, _fileName)
 	else
 		set unprocessedString to _dirName
 	end if
-	
-	#
-	#	Processing the string into a query
-	#
+
+	--	Processing the string into a query
+	--	Replace . and _ with space
 	set queryString to do shell script ("echo " & quoted form of unprocessedString & " | sed -n 's/[\\._]/ /gp'") -- Replace dots and underscores with space
-	#	If there is junk, remove it:
-	#	Set the shittiest regexp ever because OS X's sed is always case insensitive
+	--	If there is junk, remove it:
+	--	Set the shittiest regexp ever because OS X's sed is always case insensitive
 	set shittyRE to "s/(([dD][vV][dD]|[hH][dD]|[bB][rR]|[bB][dD]|[wW][eE][bB])+([rR][iI][pP]|[cC][aA][mM]|[tT][sS])|[xX][vV][iI][dD]|[dD][iI][vV][xX]|[0-9][cC][dD]|720[pP]|1080[pP]|[cC][dD]\\.[0-9]|\\[|\\{|\\(|.[0-9]{4}).*//"
 	set queryString to do shell script ("echo " & quoted form of queryString & " | sed -E " & quoted form of shittyRE)
-	
+
 	return queryString
-	
+
 end MakeString
-#
-#
-#
-#
-#
-#
-#
-#
-#
-#
+
+
 on GetNewName(_queryString, _extension, _apiURL)
-	
-	#	Make query search compatible
+
+	--	Get data necessary for file renaming
+	--	Make query search compatible with themoviedb.api
 	set _queryString to do shell script ("echo " & quoted form of _queryString & " | sed 's/ /+/g'")
+
 	tell application "JSON Helper"
-		
-		#	Set API URLs:
+
+		--	Set API URLs:
 		set searchURL to "http://api.themoviedb.org/3/search/movie?query="
 		set fetchURL to "http://api.themoviedb.org/3/movie/"
 		set appendURL to "?append_to_response=credits"
-		
-		#	Fetch search results
+
+		--	Fetch search results
 		set fetchResults to fetch JSON from (searchURL & _queryString & _apiURL)
-		
-		#	Extract data
+
+		--	Extract data
 		set movieTitle to original_title of item 1 of results of fetchResults as string
 		set movieID to |id| of item 1 of results of fetchResults as string
 		set releaseDate to release_date of item 1 of results of fetchResults as string
 		set releaseYear to ((characters 4 thru 1 of releaseDate) as string)
-		
-		#	Get other information (director)
+
+		--	Get other information (director)
 		set movieData to fetch JSON from (fetchURL & movieID & appendURL & _apiURL)
 		set nrOfItems to count of items of crew of credits of movieData
-		
-		set iterations to 1
-		
-		repeat while iterations < nrOfItems + 1
-			set tempString to job of item iterations of crew of credits of movieData as string
-			if tempString is "Director" then
-				set directorName to |name| of item iterations of crew of credits of movieData
-				exit repeat
-			end if
-			set iterations to iterations + 1
-		end repeat
-		
+
 	end tell
-	
+	--	Trim forbidden chars from movieTitle
+	set movieTitle to RunSed(movieTitle, "-E ", "s/:/", "", "")
+	set iterations to 1
+
+	repeat while iterations < nrOfItems + 1
+		set tempString to job of item iterations of crew of credits of movieData as string
+		if tempString is "Director" then
+			set directorName to |name| of item iterations of crew of credits of movieData
+			exit repeat
+		end if
+		set iterations to iterations + 1
+	end repeat
+
+	--	Format: %title% - %year% - %director%.%extension%
 	return movieTitle & " - " & releaseYear & " - " & directorName & _extension
-	
+
 end GetNewName
+
+on RunSed(_echoArgument, _sedOptions, _sedRegExp, _sedReplace, _sedFlags)
+
+	--	Handles every call to bash regarding regular expressions.
+	--
+	--	Usage limitations:
+	--	*	If set (if not ""), _sedOptions MUST end with a
+	--		space, like so "-n "
+	--	*	_sedRegExp MUST begin with s/ and end with
+	--		a slash, like so "s/REGEXP/"
+	--	*	Because of I don't know why, no slashes are allowed
+	--		in _sedReplace
+	--	*	No slashes in _sedFlags either
+	--	Obviously, these limitations are only instructional,
+	--	no security is implemented. If you change rexexps,
+	--	make sure you know what you're doing.
+
+	--	For line brevity reasons, copy the input to shorter vars
+	set eA to quoted form of _echoArgument
+	copy _sedOptions to sO
+	copy _sedRegExp to sE
+	copy _sedReplace to sR
+	copy _sedFlags to sF
+
+	--	Concatenate to argument
+	set sedArgument to quoted form of (sE & sR & "/" & sF)
+	--	Concatenate to command
+	set command to "echo " & eA & " | sed " & sO & sedArgument
+
+	--	Run in Bash
+	set output to do shell script (command)
+
+	return output
+
+end RunSed
