@@ -90,7 +90,7 @@ on GetVideos(_dirContents, _dirPath)
 			end if
 
 			if folderFlag is true then
-				--	Chankge working directory
+				--	Change working directory
 				set _dirPath to value of lineFromLS
 				--	Next line is either blank or file
 				set folderFlag to false
@@ -99,26 +99,25 @@ on GetVideos(_dirContents, _dirPath)
 			end if
 
 			--	Regular expression to extract the extension with sed
-			set sedArgOpt to "s/\\(.*\\)\\(\\.[a-zA-Z0-9]\\{2,4\\}$\\)/\\2/p"
-
-			--	Create shell line
-			set executeCmd to "echo " & quoted form of lineFromLS & " | sed -n " & quoted form of sedArgOpt
-			set regExpResult to do shell script (executeCmd)
+			set fExt to RunSed(lineFromLs,"-n ","s/\\(.*\\)\\(\\.[a-zA-Z0-9]\\{2,4\\}$\\)/","\\2","p")
 
 			--	Check if video file (by extension comparison)
-			if regExpResult is in extList then
-				--	Temp list
+			if fExt is in extList then
+
+				--	Backslash the hell out of it
 				set lineFromLS to RunSed(lineFromLS, "-E ", "s/( |\\(|\\))/", "\\\\\\1", "g")
+
 				--	If this is the first video file in directory
 				if (firstTime is true) then
 					--	Not first time anymore
 					set firstTime to false
-					--	Replace "" with file path
+					--	Replace first entry ("") with file path
 					set item 1 of videoList to (_dirPath & lineFromLS)
 				else
 					--	Not the first time; Append file path to the list
 					set videoList to videoList & (_dirPath & lineFromLS)
 				end if
+
 			end if
 		end try
 
@@ -145,7 +144,7 @@ on ChooseMovieFile(_videoFiles)
 		--	This is a work-around a problem I had with folder
 		--	directories with spaces in them. Echoed result of
 		--	videoEntry strips the backslashes, which is good
-		--	for "System Events" but bad for shell, thus *Temp
+		--	for "System Events" but bad for bash, thus *Temp
 
 		set videoEntryTemp to do shell script ("echo " & videoEntry)
 		try
@@ -155,19 +154,19 @@ on ChooseMovieFile(_videoFiles)
 				--	Get meta information for the file(s)
 				tell application "System Events"
 
-					--	Usually 600, represents the value of 1 second
+					--	For some reason, this is always 600
 					set timeScale to time scale of movie file videoEntryTemp
 					--	Upscaled by timeScale, in seconds
 					set durationOfVideo to duration of movie file videoEntryTemp
-					--	Downscaled by timeScale and 60 to get minutes
+					--	Downscale by timeScale and 60 to get minutes
 					set durationScaled to durationOfVideo / timeScale / 60
 					--	In Bytes, so probably hundreds of millions
 					set sizeOfVideoFile to size of movie file videoEntryTemp
 
 				end tell
 
-				--	Get extension
-				set extension to do shell script ("echo " & quoted form of videoEntryTemp & " | sed -n 's/\\(.*\\)\\(\\.[a-zA-Z0-9]\\{3,4\\}$\\)/\\2/p'")
+				--	Get extension, I know, again...
+				set extension to RunSed(videoEntryTemp,"-n ","s/\\(.*\\)\\(\\.[a-zA-Z0-9]\\{3,4\\}$\\)/","\\2","p")
 
 				--	Check sizes
 				if (sizeOfVideoFile > sizeOfLargest) then
@@ -176,6 +175,7 @@ on ChooseMovieFile(_videoFiles)
 					--	Update largest file size
 					set sizeOfLargest to sizeOfVideoFile
 				end if
+
 			end if
 		end try
 
@@ -191,6 +191,7 @@ on IsMovie(_movieFile)
 	--	This is a tricky one.
 	--	I do a basic length and size check and do a regular
 	--	expression check for usual tv torrent names.
+	--	Only the length check doesn't work.
 
 	--	Set cutoff (minimum) time (in minutes) for a movie
 	set cutoffLength to 81
@@ -202,16 +203,14 @@ on IsMovie(_movieFile)
 	--	so we check in the file name for TV patterns
 
 	--	Regular expression for SxxExx format (S02E14)
-	set sedArgOpt1 to "s/\\(.*\\)\\([sS][0-9]\\{1,2\\}[eE][0-9]\\{1,2\\}\\)\\(.*\\)/false/p"
+	set sedArgOpt1 to "s/\\(.*\\)\\([sS][0-9]\\{1,2\\}[eE][0-9]\\{1,2\\}\\)\\(.*\\)/"
 	--	Regular expression for SSxEE format (3x02)
-	set sedArgOpt2 to "s/\\(.*\\)\\([0-9]\\{1,2\\}[xX][0-9]\\{1,2\\}\\)\\(.*\\)/false/p"
+	set sedArgOpt2 to "s/\\(.*\\)\\([0-9]\\{1,2\\}[xX][0-9]\\{1,2\\}\\)\\(.*\\)/"
 
 	--	Regular expressions return "false" if the pattern
 	--	is found, "" otherwise.
-	set checkRE to "echo " & quoted form of item 1 of _movieFile & " | sed -n " & quoted form of sedArgOpt1
-	set reCheck1 to do shell script (checkRE)
-	set checkRE to "echo " & quoted form of item 1 of _movieFile & " | sed -n " & quoted form of sedArgOpt2
-	set reCheck2 to do shell script (checkRE)
+	set reCheck1 to RunSed(_movieFile,"-n ",sedArgOpt1,"false","p")
+	set reCheck2 to RunSed(_movieFile,"-n ",sedArgOpt2,"false","p")
 
 	--	Checking for regular expressions first.
 	--	If file name is not a tv pattern (value is "")
@@ -241,18 +240,14 @@ on MakeString(_dirName, _fileName)
 	--	If not, choose the longer one to represent the query.
 
 	--	Trim the extension from filename
-	set sedArgOpt to "s/\\(\\.[a-zA-Z0-9]\\{2,4\\}\\)\\{0,1\\}$//p"
-	set executeCmd to "echo " & quoted form of _fileName & " | sed -n " & quoted form of sedArgOpt
-	set _fileName to do shell script (executeCmd)
+	set sedArgOpt to "s/\\(\\.[a-zA-Z0-9]\\{2,4\\}\\)\\{0,1\\}$/"
+	set _fileName to RunSed(_fileName,"-n ",sedArgOpt,"","p")
 
 	--	Remove path prior to the file name
-	set sedArgOpt to "s/\\(.*\\)\\/\\(.*\\)$/\\2/p"
-	set executeCmd to "echo " & quoted form of _fileName & " | sed -n " & quoted form of sedArgOpt
-	set _fileName to do shell script (executeCmd)
-
+	set sedArgOpt to "s/\\(.*\\)\\/\\(.*\\)$/"
+	set _fileName to RunSed(_fileName,"-n ",sedArgOpt,"\\2","p")
 	--	Remove path prior to the directory name
-	set executeCmd to "echo " & quoted form of _dirName & " | sed -n " & quoted form of sedArgOpt
-	set _dirName to do shell script (executeCmd)
+	set _dirName to RunSed(_dirName,"-n ",sedArgOpt,"\\2","p")
 
 	if (_fileName = _dirName) then
 		set unprocessedString to _fileName
@@ -264,11 +259,12 @@ on MakeString(_dirName, _fileName)
 
 	--	Processing the string into a query
 	--	Replace . and _ with space
-	set queryString to do shell script ("echo " & quoted form of unprocessedString & " | sed -n 's/[\\._]/ /gp'") -- Replace dots and underscores with space
+	set queryString to RunSed(unprocessedString,"-n ","s/[\\._]/"," ","gp")
+
 	--	If there is junk, remove it:
 	--	Set the shittiest regexp ever because OS X's sed is always case insensitive
-	set shittyRE to "s/(([dD][vV][dD]|[hH][dD]|[bB][rR]|[bB][dD]|[wW][eE][bB])+([rR][iI][pP]|[cC][aA][mM]|[tT][sS])|[xX][vV][iI][dD]|[dD][iI][vV][xX]|[0-9][cC][dD]|720[pP]|1080[pP]|[cC][dD]\\.[0-9]|\\[|\\{|\\(|.[0-9]{4}).*//"
-	set queryString to do shell script ("echo " & quoted form of queryString & " | sed -E " & quoted form of shittyRE)
+	set shittyRE to "s/(([dD][vV][dD]|[hH][dD]|[bB][rR]|[bB][dD]|[wW][eE][bB])+([rR][iI][pP]|[cC][aA][mM]|[tT][sS])|[xX][vV][iI][dD]|[dD][iI][vV][xX]|[0-9][cC][dD]|720[pP]|1080[pP]|[cC][dD]\\.[0-9]|\\[|\\{|\\(|.[0-9]{4}).*/"
+	set queryString to RunSed(queryString,"-E ",shittyRE,"","")
 
 	return queryString
 
@@ -279,7 +275,7 @@ on GetNewName(_queryString, _extension, _apiURL)
 
 	--	Get data necessary for file renaming
 	--	Make query search compatible with themoviedb.api
-	set _queryString to do shell script ("echo " & quoted form of _queryString & " | sed 's/ /+/g'")
+	set _queryString to RunSed(_queryString,"","s/ /","+","g")
 
 	tell application "JSON Helper"
 
@@ -303,7 +299,7 @@ on GetNewName(_queryString, _extension, _apiURL)
 
 	end tell
 	--	Trim forbidden chars from movieTitle
-	set movieTitle to RunSed(movieTitle, "-E ", "s/:/", "", "")
+	set movieTitle to RunSed(movieTitle, "-E ", "s/:/", "", "g")
 	set iterations to 1
 
 	repeat while iterations < nrOfItems + 1
@@ -333,7 +329,7 @@ on RunSed(_echoArgument, _sedOptions, _sedRegExp, _sedReplace, _sedFlags)
 	--		in _sedReplace
 	--	*	No slashes in _sedFlags either
 	--	Obviously, these limitations are only instructional,
-	--	no security is implemented. If you change rexexps,
+	--	no security is implemented. If you change regexps,
 	--	make sure you know what you're doing.
 
 	--	For line brevity reasons, copy the input to shorter vars
